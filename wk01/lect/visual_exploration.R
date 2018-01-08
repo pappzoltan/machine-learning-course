@@ -3,8 +3,9 @@
 # install.packages('ggplot2')
 # install.packages('lubridate')
 # install.packages('ddply')
-install.packages('data.table')
+# install.packages('data.table')
 
+rm(list = ls())
 
 library(ggplot2)
 library(lubridate)
@@ -14,7 +15,7 @@ library(data.table)
 data_localfile <- "wk01/lect/data/bike_rental_train.csv"
 train <- fread(data_localfile)
 
-train$season  <- factor(train$season, labels = c("Spring", "Summer", "Fall", "Winter"))
+train$season  <- factor(train$season, labels = c("Q1", "Q2", "Q3", "Q4"))
 train$weather <- factor(train$weather, labels = c("Good", "Normal", "Bad", "Very Bad"))
 train$hour    <- factor(hour(ymd_hms(train$datetime)))
 train$times   <- as.POSIXct(strftime(ymd_hms(train$datetime), format="%H:%M:%S"), format="%H:%M:%S")
@@ -54,5 +55,3 @@ ggplot(train, aes(x = hour, y = count, colour = weather)) +
   theme_minimal() +
   ggtitle("People rent bikes more when the weather is Good.\n") + 
   theme(plot.title=element_text(size=18))
-
-
