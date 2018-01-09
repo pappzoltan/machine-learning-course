@@ -3,10 +3,10 @@
 ## Machine Learning #1 and #2
 
 
-This repo contains materials for the introductory/intermediate Machine Learning (ML) courses (4 credits total) taught in the 
-[MSc in Business Analytics program](https://economics.ceu.edu/program/master-science-business-analytics) 
-at the Central European University (CEU) starting January 2018. 
-The material for the previous 2-credit course taught in 2016 and 2017 can be found 
+This repo contains materials for the introductory/intermediate Machine Learning (ML) courses (4 credits total) taught in the
+[MSc in Business Analytics program](https://economics.ceu.edu/program/master-science-business-analytics)
+at the Central European University (CEU) starting January 2018.
+The material for the previous 2-credit course taught in 2016 and 2017 can be found
 [here](https://github.com/szilard/teach-data-science-msc-analytics-ceu).
 
 
@@ -28,14 +28,14 @@ This course will build on the previous one (which introduced the basic concepts 
 
 
 
-### Course Designer (and Instructor previous years): 
+### Course Designer (and Instructor previous years):
 
-Szilárd Pafka <br> 
+Szilárd Pafka <br>
 
 
 ### Instructors
 
-Zoltán Papp <br> 
+Zoltán Papp <br>
 Jenő Pál (TA)
 
 
@@ -48,11 +48,11 @@ Jenő Pál (TA)
 (each course ML #1 and #2 separately)
 
 Weekly assignment dates and deadlines for ML #1:
-- Jan 16, due on Jan 22 8:00 AM
-- Jan 23, due on Jan 29 8:00 AM
-- Jan 30, due on Feb 5 8:00 AM
+- Jan 16, due on Jan 29 8:00 AM
+- Jan 23, due on Feb 5 8:00 AM
+- Jan 30, due on Feb 12 8:00 AM
 
-Weekly assignment acceptance policy and achievable grades: 
+Weekly assignment acceptance policy and achievable grades:
 - 100% until due date
 - 50% within 24 hours past due date
 - 0% after that.
@@ -70,10 +70,10 @@ Class announcements and student Q&A will be done via Moodle
 **Week 1:** Overview of data science. The elements of a data science project. Data preparation. Exploratory data analysis, data visualization. Machine learning. Workflow, reproducibility and productivity.
 [Lecture](wk01/lect) | [Lab](wk01/lab).
 
-**Week 2:** Introduction to supervised learning. Linear models vs k-nearest neighbors. Training and test error. Validation set. Bias and variance. Model evaluation and selection. Benchmark model selection. Boostraping, resampling. Time series split up by time. 
+**Week 2:** Introduction to supervised learning. Linear models vs k-nearest neighbors. Training and test error. Validation set. Bias and variance. Model evaluation and selection. Benchmark model selection. Boostraping, resampling. Time series split up by time.
 [Lecture](wk02/lect) | [Lab](wk02/lab).
 
-**Week 3:** A high-level introduction to RF, Lasso, SVM, Boost, NN. Overfitting, regularization, cross-validation, naive implementation. ROC curve, AUC. Calibration plot. Hyperparameter tuning, grid, and random search. 
+**Week 3:** A high-level introduction to RF, Lasso, SVM, Boost, NN. Overfitting, regularization, cross-validation, naive implementation. ROC curve, AUC. Calibration plot. Hyperparameter tuning, grid, and random search.
 [Lecture](wk03/lect) | [Lab](wk03/lab).
 
 **Week 4:** Unsupervised learning. Clustering (k-means, hierarchical). PCA / ICA. Time Series Analysis: correlation, autocorrelation, Filtering. Reviewing best practices in data science and practical research.
@@ -82,12 +82,12 @@ Class announcements and student Q&A will be done via Moodle
 
 ### ML #2
 
-**Week 9:** Deeper understanding of linear models, lasso. Understanding and tuning parameters for trees, random forests and gradient boosting machines. Impact of correlated features. Support vector machines. 
+**Week 9:** Deeper understanding of linear models, lasso. Understanding and tuning parameters for trees, random forests and gradient boosting machines. Impact of correlated features. Support vector machines.
 Tools: R packages, xgboost, lightgbm
 [Lecture](wk09/lect) | [Lab](wk09/lab).
 
 **Week 10:** Neural networks and deep learning. Reinforcement Learning. Evolutionary Computing.
-Tools: R packages, Keras. 
+Tools: R packages, Keras.
 [Lecture](wk10/lect) | [Lab](wk10/lab).
 
 **Week 11:** Ensembles, Stacking. Deploying machine learning models to production.

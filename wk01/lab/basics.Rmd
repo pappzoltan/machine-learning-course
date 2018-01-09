@@ -130,9 +130,22 @@ dt[, SurvivedInfo := NULL]
 
 ```{r}
 # aggregate by groups
-dt[, .(num_passangers = .N,
+dt_measures <- dt[, .(num_passangers = .N,
        num_survivors = sum(Survived)),
    by = .(Sex)]
+```
+
+```{r}
+# reshape data from wide to long format
+dt_measures_long <- melt(dt_measures, 
+                         id.vars = "Sex", 
+                         measures.vars = c("num_passangers", "num_survivors"))
+dt_measures_long
+```
+
+```{r}
+# from long to wide
+dcast(dt_measures_long, Sex ~ variable, direction = "wide")
 ```
 
 ### Loops, maps
@@ -156,7 +169,6 @@ str(doubled)
 doubled_vec <- map_dbl(1:5, ~ { .x * 2})
 str(doubled_vec)
 ```
-
 
 ### Visualization
 
@@ -206,8 +218,8 @@ my analysis?
 * others do not have the same directory structure: use relative paths instead
 of absolute
 * others do not necessarily use the same R and package versions
-  + provide `sessionInfo()`
-  + use some tool (out of the scope of this course. Examples: [`packrat`](https://rstudio.github.io/packrat/) package, [MRAN](https://mran.revolutionanalytics.com/) time machine)
+    + provide `sessionInfo()`
+    + use some tool (out of the scope of this course. Examples: [`packrat`](https://rstudio.github.io/packrat/) package, [MRAN](https://mran.revolutionanalytics.com/) time machine)
 * if I use random numbers, I have to ensure others use the same random numbers
   * simplest case: use `set.seed`
 
@@ -215,4 +227,9 @@ of absolute
 sessionInfo()
 ```
 
+## Recommended readings
+
+- [Elements of Statistical Learning](https://web.stanford.edu/~hastie/ElemStatLearn/) - the standard reference book of machine learning (freely available)
+- [Introduction to Statistical Learning](http://www-bcf.usc.edu/~gareth/ISL/) - a more accessible treatment of the same material from the same authors (with R codes)
+- [Applied Predictive Modelling](http://appliedpredictivemodeling.com/) - a thorough and practical guide to predictive modelling from the author of the `caret` package (with R code)
 

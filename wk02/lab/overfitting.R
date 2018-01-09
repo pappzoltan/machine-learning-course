@@ -22,7 +22,7 @@ RMSE <- function(x, true_x) sum((x - true_x)^2)
 
 regularization_parameters <- c(1, 2, 5, 10, 20, 30, 40, 50) # minbucket
 
-results <- map_df(
+results <- map_df
     regularization_parameters,
     ~ {
         param <- .

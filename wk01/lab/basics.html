@@ -292,12 +292,24 @@ head(dt[, .(Survived, SurvivedInfo)])</code></pre>
 <pre class="r"><code># delete variable
 dt[, SurvivedInfo := NULL]</code></pre>
 <pre class="r"><code># aggregate by groups
-dt[, .(num_passangers = .N,
+dt_measures &lt;- dt[, .(num_passangers = .N,
        num_survivors = sum(Survived)),
    by = .(Sex)]</code></pre>
+<pre class="r"><code># reshape data from wide to long format
+dt_measures_long &lt;- melt(dt_measures, 
+                         id.vars = &quot;Sex&quot;, 
+                         measures.vars = c(&quot;num_passangers&quot;, &quot;num_survivors&quot;))
+dt_measures_long</code></pre>
 <div data-pagedtable="false">
 <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["Sex"],"name":[1],"type":["chr"],"align":["left"]},{"label":["num_passangers"],"name":[2],"type":["int"],"align":["right"]},{"label":["num_survivors"],"name":[3],"type":["int"],"align":["right"]}],"data":[{"1":"male","2":"577","3":"109"},{"1":"female","2":"314","3":"233"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["Sex"],"name":[1],"type":["chr"],"align":["left"]},{"label":["variable"],"name":[2],"type":["fctr"],"align":["left"]},{"label":["value"],"name":[3],"type":["int"],"align":["right"]}],"data":[{"1":"male","2":"num_passangers","3":"577"},{"1":"female","2":"num_passangers","3":"314"},{"1":"male","2":"num_survivors","3":"109"},{"1":"female","2":"num_survivors","3":"233"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+  </script>
+</div>
+<pre class="r"><code># from long to wide
+dcast(dt_measures_long, Sex ~ variable, direction = &quot;wide&quot;)</code></pre>
+<div data-pagedtable="false">
+<script data-pagedtable-source type="application/json">
+{"columns":[{"label":["Sex"],"name":[1],"type":["chr"],"align":["left"]},{"label":["num_passangers"],"name":[2],"type":["int"],"align":["right"]},{"label":["num_survivors"],"name":[3],"type":["int"],"align":["right"]}],"data":[{"1":"female","2":"314","3":"233"},{"1":"male","2":"577","3":"109"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 </div>
@@ -371,9 +383,11 @@ ggplot(data = calibration,
 <p>For yourself, for others. What is necessary for anyone else to reproduce my analysis?</p>
 <ul>
 <li>others do not have the same directory structure: use relative paths instead of absolute</li>
-<li>others do not necessarily use the same R and package versions</li>
+<li>others do not necessarily use the same R and package versions
+<ul>
 <li>provide <code>sessionInfo()</code></li>
 <li>use some tool (out of the scope of this course. Examples: <a href="https://rstudio.github.io/packrat/"><code>packrat</code></a> package, <a href="https://mran.revolutionanalytics.com/">MRAN</a> time machine)</li>
+</ul></li>
 <li>if I use random numbers, I have to ensure others use the same random numbers</li>
 <li>simplest case: use <code>set.seed</code></li>
 </ul>
@@ -406,6 +420,14 @@ ggplot(data = calibration,
 ## [25] pillar_1.0.1     scales_0.5.0     backports_1.1.2  jsonlite_1.5    
 ## [29] pkgconfig_2.0.1</code></pre>
 </div>
+</div>
+<div id="recommended-readings" class="section level2">
+<h2>Recommended readings</h2>
+<ul>
+<li><a href="https://web.stanford.edu/~hastie/ElemStatLearn/">Elements of Statistical Learning</a> - the standard reference book of machine learning (freely available)</li>
+<li><a href="http://www-bcf.usc.edu/~gareth/ISL/">Introduction to Statistical Learning</a> - a more accessible treatment of the same material from the same authors (with R codes)</li>
+<li><a href="http://appliedpredictivemodeling.com/">Applied Predictive Modelling</a> - a thorough and practical guide to predictive modelling from the author of the <code>caret</code> package (with R code)</li>
+</ul>
 </div>
 
 
