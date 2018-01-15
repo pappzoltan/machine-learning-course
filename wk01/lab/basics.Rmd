@@ -14,7 +14,11 @@ output:
 
 Install necessary packages. We will install more as we progress in the course.
 
+<<<<<<< HEAD
 ```{r, eval=FALSE}
+=======
+```{r, eval=FALSE, results="hide"}
+>>>>>>> 8ea508ebcc1532497265b2c7818dcae5055d7440
 install.packages(c("ggplot2",
                    "readr",
                    "data.table",
@@ -30,7 +34,7 @@ install.packages(c("ggplot2",
 ```
 
 If we want to use packages, we have to import them.
-```{r, message=FALSE}
+```{r, messages=FALSE}
 library(data.table)
 library(readr)
 library(ggplot2)
