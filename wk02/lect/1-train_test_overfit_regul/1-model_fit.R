@@ -14,7 +14,7 @@ deg <- 20    # try: 5, 4, 8, 20   (complexity of the model)
 dpoly_xy <- data.frame(poly(x,deg), y)      # expand x poly
 md <- lm(y ~ ., dpoly_xy)                   # f^ 
 
-lines(predict(md, dpoly_xy) ~ x, col = "#0000ff")      # f^(x) ~ x
-#lines(predict(md, dpoly_xy) ~ x, col = "#5555ff")      # f^(x) ~ x
-#lines(predict(md, dpoly_xy) ~ x, col = "magenta")      # f^(x) ~ x
-#lines(predict(md, dpoly_xy) ~ x, col = "#aaaaff")      # f^(x) ~ x
+lines(predict(md, dpoly_xy) ~ x, col = "blue")         # f^(x) ~ x
+lines(predict(md, dpoly_xy) ~ x, col = "#5555ff")      # f^(x) ~ x
+lines(predict(md, dpoly_xy) ~ x, col = "magenta")      # f^(x) ~ x
+lines(predict(md, dpoly_xy) ~ x, col = "#aaaaff")      # f^(x) ~ x

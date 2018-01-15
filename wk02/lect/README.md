@@ -7,7 +7,7 @@ Training and test error. Bias and variance.
 
 ### Slides
 
-Slides [here](https://drive.google.com/open?id=1SrN4kk8TMopxjU9cL_HW67G2R17iMWiHaeIKcIe5V3M).
+Slides [here](https://drive.google.com/open?id=16rgKZMA1ch_TwwsuLXWIRM8lIMBcaWCvnqceeNd5DTg).
 
 
 ### Reading

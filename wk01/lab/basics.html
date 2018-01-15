@@ -132,7 +132,7 @@ $(document).ready(function () {
 <div id="packages" class="section level2">
 <h2>Packages</h2>
 <p>Install necessary packages. We will install more as we progress in the course.</p>
-<pre class="r"><code>install.packages(c(&quot;ggplot2&quot;
+<pre class="r"><code>install.packages(c(&quot;ggplot2&quot;,
                    &quot;readr&quot;,
                    &quot;data.table&quot;,
                    &quot;purrr&quot;,
@@ -149,6 +149,11 @@ $(document).ready(function () {
 library(readr)
 library(ggplot2)
 library(purrr)</code></pre>
+<pre><code>## 
+## Attaching package: 'purrr'</code></pre>
+<pre><code>## The following object is masked from 'package:data.table':
+## 
+##     transpose</code></pre>
 <p>We will use <a href="https://www.h2o.ai/"><code>h2o</code></a> in the second part of the course. Its installation requires Java. Once that is installed, run</p>
 <pre class="r"><code>install.packages(&quot;h2o&quot;)</code></pre>
 <p>To test if the installation works, run these:</p>
