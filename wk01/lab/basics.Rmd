@@ -15,7 +15,7 @@ output:
 Install necessary packages. We will install more as we progress in the course.
 
 ```{r, eval=FALSE}
-install.packages(c("ggplot2"
+install.packages(c("ggplot2",
                    "readr",
                    "data.table",
                    "purrr",
