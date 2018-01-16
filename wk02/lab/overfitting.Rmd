@@ -1,0 +1,243 @@
+---
+title: "Lab week 2 - Overfitting and its remedies"
+subtitle: "Data Science and Machine Learning 1 - CEU 2018"
+author: "Jeno Pal"
+date: '2018-01-16'
+output:
+  html_document:
+    df_print: paged
+  html_notebook:
+    df_print: paged
+---
+
+```{r, message=FALSE}
+library(data.table)
+library(ggplot2)
+library(GGally) # ggplot extensions, install if it is missing
+library(caret)
+library(rpart)
+
+theme_set(theme_bw())   # globally set ggplot theme
+
+set.seed(1234)
+```
+
+
+## Data: King County house sales
+
+The dataset was downloaded from [Kaggle](https://www.kaggle.com/harlfoxem/housesalesprediction).
+```{r}
+# https://www.kaggle.com/harlfoxem/housesalesprediction/data
+data <- fread("../../data/king_county_house_prices/kc_house_data.csv")
+str(data)
+```
+
+```{r}
+# some cleaning and a new variable
+data[, `:=`(floors = as.numeric(floors), zipcode = factor(zipcode))]
+data[, log_price := log(price)]
+
+# we won't need some variables
+data[, c("id", "date", "sqft_living15", "sqft_lot15") := NULL]
+```
+
+Look at the outcome variable, the price of houses.
+```{r}
+ggplot(data = data, aes(x = price)) + geom_density()
+```
+```{r}
+ggplot(data = data, aes(x = log_price)) + geom_density()
+```
+
+Let's see correlations of features and the outcome variable. Based on this,
+simple benchmark models can quickly be put together.
+```{r}
+ggcorr(data)
+```
+
+```{r, message=FALSE}
+ggpairs(data, columns = c("log_price", "sqft_living", "bathrooms", "sqft_above"))
+```
+
+## Overfitting
+
+Let's use `log_price` as the outcome as less skewed distributions are
+more amenable for modelling (large values do not distort performance
+measures that much).
+```{r}
+training_ratio <- 0.5
+train_indices <- createDataPartition(y = data[["log_price"]],
+                                     times = 1,
+                                     p = training_ratio,
+                                     list = FALSE)
+data_train <- data[train_indices, ]
+data_test <- data[-train_indices, ]
+```
+
+Let's train a regression tree using the `rpart` package. The parameter
+`cp` controls how complex the model is: at least `cp` increase in R squared is
+required for another cut to be made. Hence, the lower `cp` is, the more cuts
+there are in the tree, the more complex the model is.
+
+```{r}
+RMSE <- function(x, true_x) sqrt(mean((x - true_x)^2))
+
+regularization_parameters <- c(0.01, 0.001, 0.0001, 0.00001, 0.000001)
+n_parameters <- length(regularization_parameters)
+
+train_error <- rep(0, length(regularization_parameters))
+test_error <- rep(0, length(regularization_parameters))
+
+for (ix in 1:n_parameters) {
+  param <- regularization_parameters[ix]
+  model <- rpart(
+            formula = log_price ~ . - price,
+            data = data_train,
+            control = rpart.control(xval = 0,  # no cross validations
+                                    cp = param),
+            method = "anova"
+        )
+  train_error[ix] <- RMSE(predict(model, data_train), 
+                          data_train[["log_price"]])
+  test_error[ix] <- RMSE(predict(model, data_test), 
+                         data_test[["log_price"]])
+}
+
+errors <- data.table("parameter" = regularization_parameters,
+                     "train_error" = train_error,
+                     "test_error" = test_error)
+```
+
+```{r}
+errors_long <- melt(errors, id.vars = "parameter")
+ggplot(data = errors_long) + 
+  geom_line(aes(x = parameter, y = value, color = variable)) +
+  scale_x_log10()
+```
+
+It is visible that while error on the training set decreases with more complex
+models, this is not true on the independent test set.
+
+## Cross-validation
+
+```{r}
+fit_control <- trainControl(method = "cv", number = 10)
+tune_grid <- data.frame("cp" = c(0.01, 0.001, 0.0001, 0.00001, 0.000001))
+```
+
+```{r}
+# select best model parameter: hyperparameter tuning
+set.seed(857)
+rpart_fit <- train(log_price ~ . -price, 
+                   data = data_train, 
+                   method = "rpart", 
+                   trControl = fit_control,
+                   tuneGrid = tune_grid)
+rpart_fit
+# finalModel: refit using _all_ of the training data using the best parameter
+# combination
+```
+```{r}
+# note: there is a ggplot method for caret fit objects! 
+ggplot(rpart_fit) + scale_x_log10()
+```
+
+When trained this way, cross-validation is used for __hyperparameter tuning__:
+selecting the best value for a model parameter based on data.
+
+### Choose simple model that is good enough
+
+One can instruct `caret` to choose a model that is not the best but one that is
+close to it and is as simple as possible. There is a built-in option for
+choosing the simplest model within 1 standard deviation from the best choice.
+
+Also, CV can be repeated so that the standard deviation estimation is more
+precise.
+
+```{r}
+fit_control <- trainControl(method = "repeatedcv", 
+                            number = 10, 
+                            repeats = 5, # repeat CV 5 times
+                            selectionFunction = "oneSE")
+tune_grid <- data.frame("cp" = c(0.01, 0.005, 
+                                 0.001, 0.0005,
+                                 0.0001, 0.00005,
+                                 0.00001, 0.000005))
+
+set.seed(857)
+rpart_fit <- train(log_price ~ . -price, 
+                   data = data_train, 
+                   method = "rpart", 
+                   trControl = fit_control,
+                   tuneGrid = tune_grid)  # tuneLength: caret chooses 10 parameters
+rpart_fit
+```
+
+
+choose simple rule within small margin of best
+(1 standard deviation rule? see ?best oneSE. selectionFunction argument)
+
+## Model selection
+
+### Tune other types of models
+
+#### A simple benchmark
+
+It is always a good idea to choose a simple benchmark and see how more
+complicated models perform compared to this.
+
+```{r}
+# same seed as above - results in exactly the same cuts for cross-validation
+set.seed(857)
+linear_fit <- train(log_price ~ sqft_living + bathrooms + sqft_above + yr_built,
+                    method = "lm",
+                    data = data_train,
+                    trControl = fit_control)
+```
+Train a [lasso](https://en.wikipedia.org/wiki/Lasso_(statistics))
+model as well, then choose between this and the previously
+seen regression tree.
+```{r}
+# lasso model
+glm_tune_grid <- expand.grid("alpha" = 1,
+                             "lambda" = c(0.1, 0.01, 0.001, 0.0001))
+
+set.seed(857)
+lasso_fit <- train(log_price ~ . -price, 
+                   data = data_train, 
+                   method = "glmnet", 
+                   preProcess = c("center", "scale"),
+                   tuneGrid = glm_tune_grid,
+                   trControl = fit_control)
+```
+
+Choice can be based on:
+  - cross-validation
+    + assuming exactly the same cuts have been made
+  - held-out validation set
+
+### Model selection via cross validation
+
+```{r}
+resamps <- resamples(list("regression tree" = rpart_fit,
+                          "lasso" = lasso_fit,
+                          "linear" = linear_fit))
+summary(resamps)
+```
+```{r}
+diff_resamples <- diff(resamps)
+dotplot(diff_resamples)
+```
+
+Final model performance evaluation on independet test set not used for
+hyperparameter tuning or model selection:
+
+```{r}
+test_prediction <- predict.train(lasso_fit, newdata = data_test)
+RMSE(test_prediction, data_test[["log_price"]])
+```
+
+
+
+
+
