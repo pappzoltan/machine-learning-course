@@ -1,5 +1,5 @@
 ---
-title: "DS2 Lab2 - Classification, Stacking"
+title: "DS2 Lab3 - Classification, Stacking"
 subtitle: "Data Science 2: Machine Learning Tools - CEU 2021"
 author: "Janos K. Divenyi, Jeno Pal"
 date: '2021-03-11'
