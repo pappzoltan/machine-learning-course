@@ -1,8 +1,8 @@
 ---
-title: "Lab week 3 - Neural nets and deep learning"
-subtitle: "Data Science and Machine Learning 3 - CEU 2020"
-author: "Jeno Pal"
-date: '2020-03-04'
+title: "DS2 Lab4 - Neural nets"
+subtitle: "Data Science 2: Machine Learning Tools - CEU 2021"
+author: "Janos K. Divenyi, Jeno Pal"
+date: '2020-03-22'
 output:
   html_document:
     df_print: paged
@@ -10,19 +10,24 @@ output:
     df_print: paged
 ---
 
-```{r, message=FALSE}
-library(ISLR)
-library(data.table)
-library(caret)
-library(skimr)
-library(ROCR)
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
 ```
+
+```{r}
+library(tidyverse)
+library(caret)
+theme_set(theme_minimal())
+
+my_seed <- 20210322
+```
+
 
 ## Neural nets with `caret`
 
 Very large number of parameters: regularization is needed. Done via
 ideas similar to ridge or lasso. (Hence it is a good idea to
-center and scale features and remove correlated features / de-correlate 
+center and scale features and remove correlated features / de-correlate
 them. Concrete example here: many binary features, then it
 may not help much).
 
@@ -34,158 +39,235 @@ averaging can help.
 # the famous german credit data
 # downloaded in friendly form from
 # https://github.com/stedy/Machine-Learning-with-R-datasets/blob/master/credit.csv
-data <- fread("../../data/german_credit/german_credit.csv")
-skim(data)
+data <- read_csv("https://raw.githubusercontent.com/stedy/Machine-Learning-with-R-datasets/master/credit.csv")
+skimr::skim(data)
 ```
+
 ```{r}
-data[, default := factor(ifelse(default == 1, "No", "Yes"))]
+data <- mutate(data, default = factor(ifelse(default == 2, "Yes", "No"), levels = c("Yes", "No")))
+summarize(data, default_probability = mean(default == "Yes"))
 
 # turn character variables to factors
-character_variables <- names(data)[sapply(names(data),
-                                          function(x) is.character(data[[x]]))]
-data <- data[, 
-             (character_variables) := lapply(.SD, as.factor), 
-             .SDcols = character_variables]
-  
+data <- mutate(data, across(where(is.character), as.factor))
 ```
 
 ```{r}
-training_ratio <- 0.75 
-set.seed(123)
-train_indices <- createDataPartition(y = data[["default"]],
-                                     times = 1,
-                                     p = training_ratio,
-                                     list = FALSE)
+training_ratio <- 0.75
+set.seed(my_seed)
+train_indices <- createDataPartition(
+  y = data[["default"]],
+  times = 1, p = training_ratio, list = FALSE
+) %>% as.vector()
 data_train <- data[train_indices, ]
 data_test <- data[-train_indices, ]
 ```
 
 ```{r}
-train_control <- trainControl(method = "cv",
-                              number = 5,
-                              classProbs = TRUE,
-                              summaryFunction = twoClassSummary)
+train_control <- trainControl(
+  method = "cv",
+  number = 5,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary
+)
 ```
 
 ```{r}
 # baseline logistic model
-set.seed(857)
-glm_model <- train(default ~ .,
-                   method = "glm",
-                   data = data_train,
-                   trControl = train_control,
-                   # preProcess = c("center", "scale", "pca"),
-                   metric = "ROC")
+set.seed(my_seed)
+glm_model <- train(
+  default ~ .,
+  method = "glm",
+  data = data_train,
+  trControl = train_control,
+  metric = "ROC"
+)
 glm_model
+confusionMatrix(glm_model)
 ```
 
 Size: number of units in the hidden layer. Decay: regularization parameter.
 ```{r}
-tune_grid <- expand.grid(size = c(3, 5, 7, 10, 15),
-                         decay = c(0.1, 0.5, 1, 1.5, 2, 2.5, 5))
+tune_grid <- expand.grid(
+  size = c(3, 5, 7, 10, 15),
+  decay = c(0.1, 0.5, 1, 1.5, 2, 2.5, 5)
+)
 
-set.seed(857)
-nnet_model <- train(default ~ .,
-                   method = "nnet",
-                   data = data_train,
-                   trControl = train_control,
-                   tuneGrid = tune_grid,
-                   # decay: regularization, has to center and scale like with Ridge, Lasso
-                   # PCA: correlated variables are problematic for gradient-based optimization
-                   preProcess = c("center", "scale", "pca"),
-                   metric = "ROC",
-                   # avoid extensive iteration output
-                   trace = FALSE)
+set.seed(my_seed)
+nnet_model <- train(
+  default ~ .,
+  method = "nnet",
+  data = data_train,
+  trControl = train_control,
+  tuneGrid = tune_grid,
+  # decay: regularization, has to center and scale like with Ridge, Lasso
+  # PCA: correlated variables are problematic for gradient-based optimization
+  preProcess = c("center", "scale", "pca"),
+  metric = "ROC",
+  # avoid extensive iteration output
+  trace = FALSE
+)
 nnet_model
+nnet_model$finalModel
+confusionMatrix(nnet_model)
 ```
+
 ```{r}
-nnet_prediction <- prediction(predict.train(nnet_model, 
-                                            newdata = data_test,
-                                            type = "prob")$Yes,
-                              data_test[["default"]])
-performance(nnet_prediction, measure = "auc")@y.values[[1]]
+nnet_prediction <- predict(nnet_model, newdata = data_test, type = "prob")$Yes
+# to calculate AUC on the test set, we need the pROC package
+pROC::auc(pROC::roc(data_test$default, nnet_prediction))
 ```
+
+### Evaluate classification models trained by caret (ROC)
+
+We can create ROC curve from `caret` models as well.
+```{r}
+# First, replicate Confusion Matrix
+cm <- table(
+  factor(ifelse(nnet_prediction > 0.5, "Yes", "No"), levels = c("Yes", "No")),
+  data_test$default,
+  dnn = c("prediction", "reference")
+)
+cm
+cm / sum(cm)
+```
+
+```{r}
+# Write function to calculate CM for any cutoff
+getConfusionMatrix <- function(predictions, data, cutoff = 0.5) {
+  table(
+    factor(ifelse(predictions > cutoff, "Yes", "No"), levels = c("Yes", "No")),
+    data$default,
+    dnn = c("prediction", "reference")
+  )
+}
+getConfusionMatrix(nnet_prediction, data_test, 0.5)
+getConfusionMatrix(nnet_prediction, data_test, 0.1)
+# calculate FPR (1 - specificity) and TPR (sensitivity)
+calculateFPRTPR <- function(confusion_matrix) {
+    fpr <- confusion_matrix[1, 2] / sum(confusion_matrix[, 2])
+    tpr <- confusion_matrix[1, 1] / sum(confusion_matrix[, 1])
+    tibble(fpr, tpr)
+}
+calculateFPRTPR(getConfusionMatrix(nnet_prediction, data_test, 0.5))
+calculateFPRTPR(getConfusionMatrix(nnet_prediction, data_test, 0.1))
+
+data_for_roc <- map_df(
+  seq(0, 1, 0.01),
+  ~calculateFPRTPR(getConfusionMatrix(nnet_prediction, data_test, .x))
+) %>% mutate(model = "NNet")
+
+# recall our functions from lab "stacking"
+plotROC <- function(performance_df) {
+  ggplot(performance_df, aes(fpr, tpr, color = model)) +
+    geom_path() +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    coord_fixed() +
+    labs(x = "False Positive Rate", y = "True Positive Rate")
+}
+plotROC(data_for_roc)
+```
+
+### Train nets with different starting points
 
 `nnet` with different random initial seeds. (Default: 5 initial seeds, training takes
-5x times with the same grid. Parameter `repeats` controls the number of seeds.)
+5x times with the same grid. Parameter `repeats` controls the number of seeds.) The final result comes from averaging.
 ```{r}
-# takes a long time to run for the whole grid above
-tune_grid <- expand.grid(size = c(3),
-                         decay = c(2.5),
-                         bag = FALSE)
+# takes a long time to run for the whole grid above so we just run for one parameter set
+tune_grid <- expand.grid(size = 3, decay = 2.5, bag = FALSE)
 
-set.seed(857)
-avnnet_model <- train(default ~ .,
-                   method = "avNNet",
-                   data = data_train,
-                   trControl = train_control,
-                   tuneGrid = tune_grid,
-                   preProcess = c("center", "scale", "pca"),
-                   metric = "ROC",
-                   # avoid extensive iteration output
-                   trace = FALSE)
+set.seed(my_seed)
+avnnet_model <- train(
+  default ~ .,
+  method = "avNNet",
+  data = data_train,
+  repeats = 5,
+  trControl = train_control,
+  tuneGrid = tune_grid,
+  preProcess = c("center", "scale", "pca"),
+  metric = "ROC",
+  trace = FALSE
+)
 avnnet_model
 ```
 
 ```{r}
-avnnet_prediction <- prediction(predict.train(avnnet_model, 
-                                            newdata = data_test,
-                                            type = "prob")$Yes,
-                              data_test[["default"]])
-performance(avnnet_prediction, measure = "auc")@y.values[[1]]
+avnnet_prediction <- predict(avnnet_model, newdata = data_test, type = "prob")$Yes
+data_for_roc <- bind_rows(
+  data_for_roc,
+  map_df(
+    seq(0, 1, 0.01),
+    ~calculateFPRTPR(getConfusionMatrix(avnnet_prediction, data_test, .x))
+  ) %>% mutate(model = "avNNet")
+)
+plotROC(data_for_roc)
 ```
 
 ## Deep learning with `h2o`
 
-"Deep": many layers of hidden units. 
+"Deep": many layers of hidden units.
 
-Note on estmiation: when having large datasets, k-fold cross validation can become
+Note on estimation: when having large datasets, k-fold cross validation can become
 computationally burdensome, hence many times train/validation/test approach is used.
-(see answer on Quora by Yoshua Bengio, one of the originators of deep learning [here](https://www.quora.com/Is-cross-validation-heavily-used-in-deep-learning-or-is-it-too-expensive-to-be-used)). However, cross validation can still be used
-to tune some of the hyperparameters.
+(see answer on Quora by Yoshua Bengio, one of the originators of deep learning [here](https://www.quora.com/Is-cross-validation-heavily-used-in-deep-learning-or-is-it-too-expensive-to-be-used)). However, cross validation can still be used to tune some of the hyperparameters.
 
 ```{r}
 library(h2o)
-# h2o.init(nthreads=-1)
-h2o.init(nthreads=-1, max_mem_size = '8g')
+h2o.init()
+h2o.no_progress()
 ```
 
 ```{r}
-data <- h2o.importFile("../../data/airlines/airline100K.csv")
+data_split <- h2o.splitFrame(as.h2o(data), ratios = 0.75, seed = my_seed)
+data_train_h2o <- as.h2o(data_train)
+data_test_h2o <- as.h2o(data_test)
 
-# take 10% as training set to speed up computations
-data_split <- h2o.splitFrame(data, ratios = c(0.1, 0.4), seed = 123)
-data_train <- data_split[[1]]
-data_valid <- data_split[[2]]
-data_test <- data_split[[3]]
-
-y <- "dep_delayed_15min"
-X <- setdiff(names(data_train), y)
+y <- "default"
+X <- setdiff(names(data_train_h2o), y)
 ```
 
 Validation frame: used to determine early stopping conditions. More on this later.
 
 ```{r}
-dl_model <- h2o.deeplearning(x = X, 
-                             y = y, 
-                             training_frame = data_train, 
-                             validation_frame = data_valid,
-                             # reproducible = TRUE,  # makes training slower but makes it reproducible
-                             seed = 123)
-h2o.performance(dl_model, data_test)@metrics$AUC
+dl_model <- h2o.deeplearning(
+  x = X, y = y,
+  training_frame = data_train_h2o,
+  model_id = "DL_default",
+  score_each_iteration =  TRUE,  # for the purpose of illustration
+  seed = my_seed
+)
+dl_model
+h2o.auc(h2o.performance(dl_model, data_test_h2o))
+```
+
+
+```{r}
+# recall our function from lab "stacking"
+getPerformanceMetrics <- function(model, newdata = NULL, xval = FALSE) {
+  h2o.performance(model, newdata = newdata, xval = xval)@metrics$thresholds_and_metric_scores %>%
+    as_tibble() %>%
+    mutate(model = model@model_id)
+}
+dl_performance <- getPerformanceMetrics(dl_model, newdata = data_test_h2o)
+
+bind_rows(
+  data_for_roc,
+  select(dl_performance, fpr, tpr, model)
+) %>%
+plotROC()
 ```
 
 ```{r}
-dl_model@model$scoring_history
+h2o.scoreHistory(dl_model)
+plot(dl_model)
 ```
 ```{r}
 dl_model@allparameters
 ```
 
 There are lots of parameters that you can change, see `?h2o.deeplearning`
-and the [docs](http://docs.h2o.ai/h2o/latest-stable/h2o-docs/data-science/deep-learning.html). Some selected parameters:
+and the [docs](http://docs.h2o.ai/h2o/latest-stable/h2o-docs/data-science/deep-learning.html). In the followings, we look at some selected parameters.
 
-Network structure and functional form
+### Network structure and functional form
 
 * `hidden`: neuron layer architecture: length of vector shows
 number of layers, number shows number of neurons within layer.
@@ -194,121 +276,139 @@ experiment with shallower but more neuron or with deeper and less neurons
 per layer architectures.
 
 ```{r}
-shallow_small_model <- h2o.deeplearning(x = X, 
-                             y = y, 
-                             training_frame = data_train, 
-                             validation_frame = data_valid,
-                             hidden = c(10),
-                             seed = 123)
-h2o.performance(shallow_small_model, data_test)@metrics$AUC
+shallow_small_model <- h2o.deeplearning(
+  x = X, y = y,
+  model_id = "DL_shallow_small",
+  training_frame = data_train_h2o,
+  hidden = c(10),
+  seed = my_seed
+)
 ```
 ```{r}
-shallow_large_model <- h2o.deeplearning(x = X, 
-                             y = y, 
-                             training_frame = data_train, 
-                             validation_frame = data_valid,
-                             hidden = c(512),
-                             seed = 123)
-h2o.performance(shallow_large_model, data_test)@metrics$AUC
-```
-
-```{r}
-deep_small_model <- h2o.deeplearning(x = X, 
-                             y = y, 
-                             training_frame = data_train, 
-                             validation_frame = data_valid,
-                             hidden = c(32, 32, 32, 32, 32),
-                             seed = 123)
-h2o.performance(deep_small_model, data_test)@metrics$AUC
+shallow_large_model <- h2o.deeplearning(
+  x = X, y = y,
+  model_id = "DL_shallow_large",
+  training_frame = data_train_h2o,
+  hidden = c(512),
+  seed = my_seed
+)
 ```
 
 ```{r}
-deep_large_model <- h2o.deeplearning(x = X, 
-                             y = y, 
-                             training_frame = data_train, 
-                             validation_frame = data_valid,
-                             hidden = c(100, 100, 100),
-                             seed = 123)
-h2o.performance(deep_large_model, data_test)@metrics$AUC
+deep_small_model <- h2o.deeplearning(
+  x = X, y = y,
+  model_id = "DL_deep_small",
+  training_frame = data_train_h2o,
+  hidden = c(32, 32, 32, 32, 32),
+  seed = my_seed
+)
 ```
-
-
-
-* `activation`: the nonlinear transformative function used. Default: Rectifier.
 
 ```{r}
-tanh_model <- h2o.deeplearning(x = X, 
-                 y = y, 
-                 training_frame = data_train, 
-                 validation_frame = data_valid,
-                 hidden = c(32, 32, 32, 32, 32),
-                 activation = "Tanh",
-                 seed = 123)
-h2o.performance(tanh_model, data_test)@metrics$AUC
+deep_large_model <- h2o.deeplearning(
+  x = X, y = y,
+  model_id = "DL_deep_large",
+  training_frame = data_train_h2o,
+  hidden = c(100, 100, 100),
+  seed = my_seed
+)
+```
+
+```{r}
+# compare performance on test set
+compareAUC <- function(list_of_models) {
+  map_df(
+    list_of_models,
+    ~tibble(model = .@model_id, auc = h2o.auc(h2o.performance(., newdata = data_test_h2o)))
+  ) %>%
+  arrange(-auc)
+}
+
+dl_models <- list(dl_model, shallow_small_model, shallow_large_model, deep_small_model, deep_large_model)
+compareAUC(dl_models)
 ```
 
 
-Training samples
+* `activation`: the nonlinear transformative function used. Default: Rectifier. "Tahn" stands for hyperbolic tangent that is very similar to sigmoid.
 
-* `epochs`: how many times will all training datapoints be used
-to adjust the model in the course of the optimization (note: early
+```{r}
+tanh_model <- h2o.deeplearning(
+  x = X, y = y,
+  model_id = "DL_tanh",
+  training_frame = data_train_h2o,
+  hidden = c(32, 32, 32, 32, 32),
+  activation = "Tanh",
+  seed = my_seed
+)
+compareAUC(list(deep_small_model, tanh_model))
+```
+
+
+### Training samples
+
+* `epochs`: how many times will all training data points be used
+to adjust the model in the course of the optimization (defaults to 10). Note: early
 stopping is used by default so there is no guarantee that
-all epochs will be used).
+all epochs will be used.
 
 * `mini_batch_size`: after how many training samples is the
 gradient update made (defaults to 1)
 
 ```{r}
-more_epochs_model <- h2o.deeplearning(x = X, 
-                 y = y, 
-                 training_frame = data_train, 
-                 validation_frame = data_valid,
-                 hidden = c(32, 32, 32, 32, 32),
-                 epochs = 20,
-                 seed = 123)
-h2o.performance(more_epochs_model, data_test)@metrics$AUC
+more_epochs_model <- h2o.deeplearning(
+  x = X, y = y,
+  model_id = "DL_more_epochs",
+  training_frame = data_train_h2o,
+  hidden = c(32, 32, 32, 32, 32),
+  epochs = 100,
+  seed = my_seed
+)
 ```
 
 ```{r}
-higher_batch_size_model <- h2o.deeplearning(x = X, 
-                 y = y, 
-                 training_frame = data_train, 
-                 validation_frame = data_valid,
-                 hidden = c(32, 32, 32, 32, 32),
-                 mini_batch_size = 10,
-                 seed = 123)
-h2o.performance(higher_batch_size_model, data_test)@metrics$AUC
+higher_batch_size_model <- h2o.deeplearning(
+  x = X, y = y,
+  model_id = "DL_higher_batch_size",
+  training_frame = data_train_h2o,
+  hidden = c(32, 32, 32, 32, 32),
+  mini_batch_size = 10,
+  seed = my_seed
+)
+compareAUC(list(deep_small_model, more_epochs_model, higher_batch_size_model))
 ```
 
-Regularization
+### Regularization
+
+You have multiple ways to regularize in a neural network. One is *"dropout"*, that "approximates training a large number of neural networks with different architectures in parallel" [source](https://machinelearningmastery.com/dropout-for-regularizing-deep-neural-networks/). Some of the nodes are randomly ignored or “dropped out” during training. Another method is to apply *penalty terms* as we did with penalized linear regressions. You can also control when the iterative optimization process should stop - with *early stopping* you can also prevent overfitting.
 
 * `hidden_dropout_ratios`: with how large probability will neurons
 be left out of the model at a step (defaults to 0.5). Have to use
 "WithDropout" activation to use dropout.
 
 ```{r}
-dropout_model <- h2o.deeplearning(x = X, 
-                 y = y, 
-                 training_frame = data_train, 
-                 validation_frame = data_valid,
-                 hidden = c(32, 32, 32, 32, 32),
-                 activation = "RectifierWithDropout",
-                 hidden_dropout_ratios = c(0.1, 0.1, 0.2, 0.2, 0.2),
-                 seed = 123)
-h2o.performance(dropout_model, data_test)@metrics$AUC
+dropout_model <- h2o.deeplearning(
+  x = X, y = y,
+  model_id = "DL_dropout",
+  training_frame = data_train_h2o,
+  hidden = c(32, 32, 32, 32, 32),
+  activation = "RectifierWithDropout",
+  hidden_dropout_ratios = c(0.1, 0.1, 0.2, 0.2, 0.2),
+  seed = my_seed
+)
 ```
 
-* `input_dropout_ratio`: drop some input features randomly
+* `input_dropout_ratio`: drop some input features randomly (defaults to 0).
 
 ```{r}
-input_dropout_model <- h2o.deeplearning(x = X, 
-                 y = y, 
-                 training_frame = data_train, 
-                 validation_frame = data_valid,
-                 hidden = c(32, 32, 32, 32, 32),
-                 input_dropout_ratio = 0.4,
-                 seed = 123)
-h2o.performance(input_dropout_model, data_test)@metrics$AUC
+input_dropout_model <- h2o.deeplearning(
+  x = X, y = y,
+  model_id = "DL_input_dropout",
+  training_frame = data_train_h2o,
+  hidden = c(32, 32, 32, 32, 32),
+  input_dropout_ratio = 0.1,
+  seed = my_seed
+)
+compareAUC(list(deep_small_model, dropout_model, input_dropout_model))
 ```
 
 For more on dropout, see the original paper [here](http://jmlr.org/papers/volume15/srivastava14a.old/srivastava14a.pdf).
@@ -316,38 +416,43 @@ For more on dropout, see the original paper [here](http://jmlr.org/papers/volume
 * `l1`, `l2`: weight on $L1$ (lasso), $L2$ (ridge) penalty terms
 
 ```{r}
-regularized_model <- h2o.deeplearning(x = X, 
-                 y = y, 
-                 training_frame = data_train, 
-                 validation_frame = data_valid,
-                 hidden = c(32, 32, 32, 32, 32),
-                 l1 = 0.001,
-                 l2 = 0.001,
-                 seed = 123)
-h2o.performance(regularized_model, data_test)@metrics$AUC
+regularized_model <- h2o.deeplearning(
+  x = X, y = y,
+  model_id = "DL_regularized",
+  training_frame = data_train_h2o,
+  hidden = c(32, 32, 32, 32, 32),
+  l1 = 0.001,
+  l2 = 0.001,
+  seed = my_seed
+)
+compareAUC(list(deep_small_model, regularized_model))
 ```
 
-* early stopping options: `stopping_rounds`, `stoppnig_metric`, `stopping_tolerance`
+* early stopping options: `stopping_rounds` (defaults to 5), `stopping_metric` (defaults to “logloss” for classification and “deviance” for regression), `stopping_tolerance` (defaults to 0.001)
 
 Training constantly tracks validation frame performance. Early stopping is enabled
 by default but can be tuned when to stop. This, again, is to prevent overfitting.
-(If you don't supply a `validation_frame`, early stopping still works but based on 
-metrics calculated from the training set = may not be as informative for out of sample
+(If you don't supply a `validation_frame`, early stopping still works but based on
+metrics calculated from the training set, so it may not be as informative for out-of-sample
 performance.)
 
 ```{r}
-early_stopping_model <- h2o.deeplearning(x = X, 
-                 y = y, 
-                 training_frame = data_train, 
-                 validation_frame = data_valid,
-                 hidden = c(32, 32, 32, 32, 32),
-                 epochs = 100,
-                 stopping_rounds = 2,
-                 stopping_metric = "AUC",
-                 stopping_tolerance = 0.01,
-                 seed = 123)
-h2o.performance(early_stopping_model, data_test)@metrics$AUC
+early_stopping_model <- h2o.deeplearning(
+  x = X, y = y,
+  model_id = "DL_early_stopping",
+  training_frame = data_train_h2o,
+  hidden = c(32, 32, 32, 32, 32),
+  score_each_iteration = TRUE,
+  epochs = 100,
+  stopping_rounds = 1,
+  stopping_metric = "AUC",
+  stopping_tolerance = 0.01,
+  seed = my_seed
+)
+plot(early_stopping_model, metric = "AUC", xval = TRUE)
+compareAUC(list(deep_small_model, early_stopping_model))
 ```
+
 
 ## Helpful resources to deepen understanding
 
