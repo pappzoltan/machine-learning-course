@@ -112,8 +112,10 @@ confusionMatrix(nnet_model)
 ```
 
 ```{r}
+glm_prediction <- predict(glm_model, newdata = data_test, type = "prob")$Yes
 nnet_prediction <- predict(nnet_model, newdata = data_test, type = "prob")$Yes
 # to calculate AUC on the test set, we need the pROC package
+pROC::auc(pROC::roc(data_test$default, glm_prediction))
 pROC::auc(pROC::roc(data_test$default, nnet_prediction))
 ```
 
@@ -167,13 +169,25 @@ plotROC <- function(performance_df) {
 plotROC(data_for_roc)
 ```
 
+```{r}
+# compare to glm
+data_for_roc <- bind_rows(
+  data_for_roc,
+  map_df(
+    seq(0, 1, 0.01),
+    ~calculateFPRTPR(getConfusionMatrix(glm_prediction, data_test, .x))
+  ) %>% mutate(model = "glm")
+)
+plotROC(data_for_roc)
+```
+
 ### Train nets with different starting points
 
 `nnet` with different random initial seeds. (Default: 5 initial seeds, training takes
 5x times with the same grid. Parameter `repeats` controls the number of seeds.) The final result comes from averaging.
 ```{r}
 # takes a long time to run for the whole grid above so we just run for one parameter set
-tune_grid <- expand.grid(size = 3, decay = 2.5, bag = FALSE)
+tune_grid <- expand.grid(size = 10, decay = 2, bag = FALSE)
 
 set.seed(my_seed)
 avnnet_model <- train(
@@ -217,8 +231,9 @@ h2o.no_progress()
 ```
 
 ```{r}
-data_split <- h2o.splitFrame(as.h2o(data), ratios = 0.75, seed = my_seed)
-data_train_h2o <- as.h2o(data_train)
+data_split <- h2o.splitFrame(as.h2o(data_train), seed = my_seed)
+data_train_h2o <- data_split[[1]]
+data_valid_h2o <- data_split[[2]]
 data_test_h2o <- as.h2o(data_test)
 
 y <- "default"
@@ -231,6 +246,7 @@ Validation frame: used to determine early stopping conditions. More on this late
 dl_model <- h2o.deeplearning(
   x = X, y = y,
   training_frame = data_train_h2o,
+  validation_frame = data_valid_h2o,
   model_id = "DL_default",
   score_each_iteration =  TRUE,  # for the purpose of illustration
   seed = my_seed
@@ -258,7 +274,7 @@ plotROC()
 
 ```{r}
 h2o.scoreHistory(dl_model)
-plot(dl_model)
+plot(dl_model, metric = "AUC")
 ```
 ```{r}
 dl_model@allparameters
@@ -280,6 +296,7 @@ shallow_small_model <- h2o.deeplearning(
   x = X, y = y,
   model_id = "DL_shallow_small",
   training_frame = data_train_h2o,
+  validation_frame = data_valid_h2o,
   hidden = c(10),
   seed = my_seed
 )
@@ -289,7 +306,9 @@ shallow_large_model <- h2o.deeplearning(
   x = X, y = y,
   model_id = "DL_shallow_large",
   training_frame = data_train_h2o,
+  validation_frame = data_valid_h2o,
   hidden = c(512),
+  score_each_iteration = TRUE,
   seed = my_seed
 )
 ```
@@ -299,6 +318,7 @@ deep_small_model <- h2o.deeplearning(
   x = X, y = y,
   model_id = "DL_deep_small",
   training_frame = data_train_h2o,
+  validation_frame = data_valid_h2o,
   hidden = c(32, 32, 32, 32, 32),
   seed = my_seed
 )
@@ -309,6 +329,7 @@ deep_large_model <- h2o.deeplearning(
   x = X, y = y,
   model_id = "DL_deep_large",
   training_frame = data_train_h2o,
+  validation_frame = data_valid_h2o,
   hidden = c(100, 100, 100),
   seed = my_seed
 )
@@ -329,18 +350,19 @@ compareAUC(dl_models)
 ```
 
 
-* `activation`: the nonlinear transformative function used. Default: Rectifier. "Tahn" stands for hyperbolic tangent that is very similar to sigmoid.
+* `activation`: the nonlinear transformative function used. Default: Rectifier. "Tanh" stands for hyperbolic tangent that is very similar to sigmoid.
 
 ```{r}
 tanh_model <- h2o.deeplearning(
   x = X, y = y,
   model_id = "DL_tanh",
   training_frame = data_train_h2o,
-  hidden = c(32, 32, 32, 32, 32),
+  validation_frame = data_valid_h2o,
+  hidden = c(512),
   activation = "Tanh",
   seed = my_seed
 )
-compareAUC(list(deep_small_model, tanh_model))
+compareAUC(list(shallow_large_model, tanh_model))
 ```
 
 
@@ -359,8 +381,10 @@ more_epochs_model <- h2o.deeplearning(
   x = X, y = y,
   model_id = "DL_more_epochs",
   training_frame = data_train_h2o,
-  hidden = c(32, 32, 32, 32, 32),
+  validation_frame = data_valid_h2o,
+  hidden = c(512),
   epochs = 100,
+  score_each_iteration = TRUE,
   seed = my_seed
 )
 ```
@@ -370,11 +394,12 @@ higher_batch_size_model <- h2o.deeplearning(
   x = X, y = y,
   model_id = "DL_higher_batch_size",
   training_frame = data_train_h2o,
-  hidden = c(32, 32, 32, 32, 32),
+  validation_frame = data_valid_h2o,
+  hidden = c(512),
   mini_batch_size = 10,
   seed = my_seed
 )
-compareAUC(list(deep_small_model, more_epochs_model, higher_batch_size_model))
+compareAUC(list(shallow_large_model, more_epochs_model, higher_batch_size_model))
 ```
 
 ### Regularization
@@ -390,9 +415,10 @@ dropout_model <- h2o.deeplearning(
   x = X, y = y,
   model_id = "DL_dropout",
   training_frame = data_train_h2o,
-  hidden = c(32, 32, 32, 32, 32),
+  validation_frame = data_valid_h2o,
+  hidden = c(512),
   activation = "RectifierWithDropout",
-  hidden_dropout_ratios = c(0.1, 0.1, 0.2, 0.2, 0.2),
+  hidden_dropout_ratios = 0.6,
   seed = my_seed
 )
 ```
@@ -404,11 +430,12 @@ input_dropout_model <- h2o.deeplearning(
   x = X, y = y,
   model_id = "DL_input_dropout",
   training_frame = data_train_h2o,
-  hidden = c(32, 32, 32, 32, 32),
+  validation_frame = data_valid_h2o,
+  hidden = 512,
   input_dropout_ratio = 0.1,
   seed = my_seed
 )
-compareAUC(list(deep_small_model, dropout_model, input_dropout_model))
+compareAUC(list(shallow_large_model, dropout_model, input_dropout_model))
 ```
 
 For more on dropout, see the original paper [here](http://jmlr.org/papers/volume15/srivastava14a.old/srivastava14a.pdf).
@@ -420,12 +447,13 @@ regularized_model <- h2o.deeplearning(
   x = X, y = y,
   model_id = "DL_regularized",
   training_frame = data_train_h2o,
-  hidden = c(32, 32, 32, 32, 32),
-  l1 = 0.001,
-  l2 = 0.001,
+  validation_frame = data_valid_h2o,
+  hidden = 512,
+  l1 = 0.01,
+  l2 = 0.01,
   seed = my_seed
 )
-compareAUC(list(deep_small_model, regularized_model))
+compareAUC(list(shallow_large_model, regularized_model))
 ```
 
 * early stopping options: `stopping_rounds` (defaults to 5), `stopping_metric` (defaults to “logloss” for classification and “deviance” for regression), `stopping_tolerance` (defaults to 0.001)
@@ -441,18 +469,20 @@ early_stopping_model <- h2o.deeplearning(
   x = X, y = y,
   model_id = "DL_early_stopping",
   training_frame = data_train_h2o,
-  hidden = c(32, 32, 32, 32, 32),
+  validation_frame = data_valid_h2o,
+  hidden = 512,
   score_each_iteration = TRUE,
   epochs = 100,
-  stopping_rounds = 1,
+  stopping_rounds = 3,
   stopping_metric = "AUC",
   stopping_tolerance = 0.01,
   seed = my_seed
 )
-plot(early_stopping_model, metric = "AUC", xval = TRUE)
-compareAUC(list(deep_small_model, early_stopping_model))
+plot(early_stopping_model, metric = "AUC")
+compareAUC(list(shallow_large_model, early_stopping_model))
+pROC::auc(pROC::roc(data_test$default, glm_prediction))
 ```
-
+The fact that our best models hardly outperformed the simple logistic regression can be explained by the nature of this data set: behavior data with a small number of observatons. Networks typically fare much better on image, text, etc. data.
 
 ## Helpful resources to deepen understanding
 
