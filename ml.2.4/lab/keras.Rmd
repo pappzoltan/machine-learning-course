@@ -1,8 +1,8 @@
 ---
-title: "Lab week 3 - Deep learning with Keras"
-subtitle: "Data Science and Machine Learning 3 - CEU 2020"
-author: "Jeno Pal"
-date: '2020-03-11'
+title: "DS2 Lab5 - Digit classification on Kaggle"
+subtitle: "Data Science 2: Machine Learning Tools - CEU 2021"
+author: "Janos K. Divenyi, Jeno Pal"
+date: '2020-03-29'
 output:
   html_document:
     df_print: paged
@@ -10,241 +10,309 @@ output:
     df_print: paged
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+```
+
+```{r initialization}
+library(tidyverse)
+my_seed <- 20210329
+```
+
+## Data
+
+```{r labelled-data}
+data_with_labels <- read_csv("train.csv")
+table(data_with_labels$label)
+```
+
+Let's plot our data.
+```{r plot-images}
+turnRowToMatrix <- function(data_row) {
+  matrix(unlist(data_row), nrow = 28, byrow = TRUE) %>%
+    apply(2, rev) %>%
+    t()
+}
+
+showDigit <- function(data_row, label) {
+  image(
+    turnRowToMatrix(data_row),
+    col = gray.colors(255), xlab = label, ylab = ""
+  )
+}
+
+showFirst6Digits <- function(data, label) {
+  par(mfrow = c(2, 3))
+  if (missing(label)) label <- rep("", 6)
+  walk(1:6, ~showDigit(data[., ], label[.]))
+}
+
+showFirst6Digits(data_with_labels[, -1], data_with_labels$label)
+```
+
+We have the same pixel data in test set but without labels.
+```{r plot-test}
+data_test <- read_csv("test.csv")
+showFirst6Digits(data_test)
+```
+
+
+To build models, we need to separate the set with labels and use one of them for validation.
+```{r data-split}
+train_indices <- sample(seq(nrow(data_with_labels)), 10000)
+data_train <- data_with_labels[train_indices, ]
+data_valid <- data_with_labels[-train_indices, ]
+```
+
+## Sample submission
+```{r silly-model}
+sillyPredictor <- function(features) {
+  rep(0, nrow(features))
+}
+calculateAccuracy <- function(prediction, y) {
+  mean(prediction == y)
+}
+silly_predictions_valid <- sillyPredictor(data_valid)
+calculateAccuracy(silly_predictions_valid, data_valid$label)
+```
+
+It might be interesting to look at misclassified samples
+```{r silly-misclassified}
+silly_misclass_samples <- silly_predictions_valid != data_valid$label
+showFirst6Digits(data_valid[silly_misclass_samples, -1], silly_predictions_valid[silly_misclass_samples])
+```
+
+```{r sily-prediction}
+sample_prediction <- tibble(imageId = seq(nrow(data_test)), label = sillyPredictor(data_test))
+write_csv(sample_prediction, "submission0.csv")
+```
+
+
+## Benchmark model: simple tree
+```{r tree}
+set.seed(my_seed)
+rpart_model <- rpart::rpart(
+  factor(label) ~ .,
+  data = data_train
+)
+treePredictor <- function(data) {
+  max.col(predict(rpart_model, newdata = data))
+}
+tree_predictions_valid <- treePredictor(data_valid)
+calculateAccuracy(tree_predictions_valid, data_valid$label)
+```
+```{r tree-prediction}
+tree_prediction <- tibble(ImageId = seq(nrow(data_test)), Label = treePredictor(data_test))
+write_csv(tree_prediction, "submission1.csv")
+```
+
+Let's examine the performance in more detail
+```{r tree-misclassified}
+tree_misclass_samples <- tree_predictions_valid != data_valid$label
+showFirst6Digits(data_valid[tree_misclass_samples, -1], tree_predictions_valid[tree_misclass_samples])
+```
+```{r confusion-matrix}
+plotConfusionMatrix <- function(label, prediction) {
+  bind_cols(label = label, predicted = prediction) %>%
+    group_by(label, predicted) %>%
+    summarize(N = n()) %>%
+    ggplot(aes(label, predicted)) +
+      geom_tile(aes(fill = N), colour = "white") +
+      scale_x_continuous(breaks = 0:9) +
+      scale_y_continuous(breaks = 0:9) +
+      geom_text(aes(label = N), vjust = 1, color = "white") +
+      scale_fill_viridis_c() +
+      theme_bw() + theme(legend.position = "none")
+}
+plotConfusionMatrix(data_valid$label, tree_predictions_valid)
+```
+```{r compare-good-and-bad}
+label5 <- bind_cols(data_valid, prediction = tree_predictions_valid) %>%
+  filter(label == 5)
+
+showFirst6Digits(
+  filter(label5, label != prediction) %>% select(-label, -prediction),
+  filter(label5, label != prediction) %>% pull(prediction)
+)
+
+showFirst6Digits(
+  filter(label5, label == prediction) %>% select(-label, -prediction)
+)
+```
+
+
 ## Deep neural nets with `keras`
 
 The [homepage](https://keras.rstudio.com/) has great descrpitions, expamples
-and tutorials. Cheatsheet [here](https://www.rstudio.com/resources/cheatsheets/). 
+and tutorials. Cheatsheet [here](https://www.rstudio.com/resources/cheatsheets/).
 
 ```{r}
-# # devtools::install_github("rstudio/keras")
+# Run this for the first time
 # install.packages("keras")
 # library(keras)
 # install_keras()
 ```
 
+
 ```{r}
 library(keras)
-library(here)
-library(grid)
-library(magick)  # not absolutely necessary
-library(data.table)
+# The keras package automatically finds your python. You can control which version to use if you have multiple ones installed.
+use_python("/usr/local/bin/python3")
 ```
 
-```{r}
-mnist <- dataset_mnist()
-x_train <- mnist$train$x
-y_train <- mnist$train$y
-x_test <- mnist$test$x
-y_test <- mnist$test$y
-```
 
-```{r, fig.width=2, fig.height=2}
-show_mnist_image <- function(x) {
-  image(1:28, 1:28, t(x)[,nrow(x):1],col=gray((0:255)/255)) 
-}
-
-show_mnist_image(x_train[18, , ])
-```
 
 ### A fully connected network example
 
-Similar to what we saw with `h2o`. 
+Similar to what we saw with `h2o`. Keras need some restructure:
 
-```{r}
-# reshape
-x_train <- array_reshape(x_train, c(dim(x_train)[1], 784)) 
-x_test <- array_reshape(x_test, c(dim(x_test)[1], 784)) 
-# rescale
-x_train <- x_train / 255
-x_test <- x_test / 255
+```{r adjust-data}
+# Separate x & rescale
+data_train_x <- as.matrix(select(data_train, -label)) / 255
+data_valid_x <- as.matrix(select(data_valid, -label)) / 255
+data_test_x <- as.matrix(data_test) / 255
 
-# one-hot encoding of the target variable
-y_train <- to_categorical(y_train, 10)
-y_test <- to_categorical(y_test, 10)
+# Separate y & one-hot encoding
+data_train_y <- to_categorical(data_train$label, 10)
+data_valid_y <- to_categorical(data_valid$label, 10)
 ```
 
-```{r}
-model <- keras_model_sequential() 
-model %>% 
+```{r keras-model}
+model <- keras_model_sequential()
+model %>%
   layer_dense(units = 128, activation = 'relu', input_shape = c(784)) %>%
   layer_dropout(rate = 0.3) %>%
   layer_dense(units = 10, activation = 'softmax')
 ```
 
-```{r}
+```{r keras-model-summary}
 summary(model)
 # 1000480 = 784 (input features) * 128 (first layer nodes) + 128 (biases)
-# 
+# 1290 = 10 (output nodes) * 128 (first layer) + 10 (biases)
 ```
 
-```{r}
-model %>% compile(
+```{r keras-model-optimization-setting}
+# Loss is optimized during the training, performance is evaluated based on the metric
+# The metric itself is not necessarily smooth so it might be not a good idea to directly optimize for that
+# compile modifies the model in place
+compile(
+  model,
   loss = 'categorical_crossentropy',
   optimizer = optimizer_rmsprop(),
   metrics = c('accuracy')
 )
 ```
 
-```{r}
-history <- model %>% fit(
-  x_train, y_train, 
-  epochs = 30, batch_size = 128, 
-  validation_split = 0.2
+```{r keras-model-training}
+fit(
+  model, data_train_x, data_train_y,
+  epochs = 30, batch_size = 128,
+  validation_data = list(data_valid_x, data_valid_y)
 )
 ```
 
-```{r}
-model %>% evaluate(x_test, y_test)
+```{r keras-model-evaluation}
+evaluate(model, data_valid_x, data_valid_y)
 ```
 
+```{r keras-predictions}
+keras_prediction <- tibble(ImageId = seq(nrow(data_test)), Label = predict_classes(model, data_test_x))
+write_csv(keras_prediction, "submission2.csv")
+```
+
+
+```{r keras-confusion-matrix}
+keras_predictions_valid <- predict_classes(model, data_valid_x)
+plotConfusionMatrix(data_valid$label, keras_predictions_valid)
+```
 Compare predictions to reality:
-```{r}
-predicted_classes_test <- model %>% predict_classes(x_test)
-real_classes_test <- as.numeric(mnist$test$y)
+```{r keras-good-and-bad}
+label5 <- bind_cols(data_valid, prediction = keras_predictions_valid) %>%
+  filter(label == 5)
 
-dt_pred_vs_real <- data.table(predicted = predicted_classes_test, real = real_classes_test)
+showFirst6Digits(
+  filter(label5, label != prediction) %>% select(-label, -prediction),
+  filter(label5, label != prediction) %>% pull(prediction)
+)
 
-library(ggplot2)
-ggplot(dt_pred_vs_real[, .N, by = .(predicted, real)], aes(predicted, real)) +
-  geom_tile(aes(fill = N), colour = "white") +
-  scale_x_continuous(breaks = 0:9) +
-  scale_y_continuous(breaks = 0:9) +
-  geom_text(aes(label = sprintf("%1.0f", N)), vjust = 1, color = "white") +
-  scale_fill_viridis_c() +
-  theme_bw() + theme(legend.position = "none")
-```
-See some mistakes:
-```{r}
-dt_pred_vs_real[, row_number := 1:.N]
-indices_of_mistakes <- dt_pred_vs_real[predicted != real][["row_number"]]
+showFirst6Digits(
+  filter(label5, label == prediction) %>% select(-label, -prediction)
+)
 ```
 
-```{r, fig.width=2, fig.height=2}
-ix <- indices_of_mistakes[1]
 
-dt_pred_vs_real[row_number == ix]
-show_mnist_image(mnist$test$x[ix, , ])
-```
-
-```{r, fig.width=2, fig.height=2}
-ix <- indices_of_mistakes[11]
-
-dt_pred_vs_real[row_number == ix]
-show_mnist_image(mnist$test$x[ix, , ])
-```
-
-## A convolutional neural net example
+### A convolutional neural net example
 
 It makes use of the 2d structure of the original input data, applying
 filters exploiting the 2d images. In `h2o` there is no option to use such models
 by default.
 
-```{r}
-mnist <- dataset_mnist()
-x_train <- mnist$train$x
-y_train <- mnist$train$y
-x_test <- mnist$test$x
-y_test <- mnist$test$y
-
-x_train <- array_reshape(x_train, c(nrow(x_train), 28, 28, 1))
-x_test <- array_reshape(x_test, c(nrow(x_test), 28, 28, 1))
-
-# rescale
-x_train <- x_train / 255
-x_test <- x_test / 255
-
-# one-hot encoding of the target variable
-y_train <- to_categorical(y_train, 10)
-y_test <- to_categorical(y_test, 10)
+```{r reshape-for-conv}
+data_train_x <- array_reshape(data_train_x, c(nrow(data_train_x), 28, 28, 1))
+data_valid_x <- array_reshape(data_valid_x, c(nrow(data_valid_x), 28, 28, 1))
+data_test_x <- array_reshape(data_test_x, c(nrow(data_test_x), 28, 28, 1))
 ```
 
-```{r}
-cnn_model <- keras_model_sequential() 
-cnn_model %>% 
-  layer_conv_2d(filters = 32,
-                kernel_size = c(3, 3), 
-                activation = 'relu',
-                input_shape = c(28, 28, 1)) %>%
-  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+```{r cnn-definition}
+cnn_model <- keras_model_sequential()
+cnn_model %>%
+  layer_conv_2d(
+    filters = 32,
+    kernel_size = c(3, 3),
+    activation = 'relu',
+    input_shape = c(28, 28, 1)
+  ) %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
   layer_dropout(rate = 0.25) %>%
-  layer_flatten() %>% 
-  layer_dense(units = 16, activation = 'relu') %>% 
+  layer_flatten() %>%
+  layer_dense(units = 16, activation = 'relu') %>%
   layer_dense(units = 10, activation = 'softmax')
 ```
 
-```{r}
+```{r cnn-summary}
 summary(cnn_model)
 ```
 
 Number of parameters:
-- `layer_conv_2d` turns 28 x 28 to 26 x 26, using 9 parameters for each filter (3 x 3 weights), plus
-a bias for each filter, altogether 320 parameters
-- `max_pooling2d` takes each disjoint 2 x 2 squares and collapes them to 1, turning a 26 x 26
-"image"" to a 13 x 13. No parameters are associated with this step.
+- `layer_conv_2d` turns 28 x 28 to 26 x 26, using 9 parameters for each filter (3 x 3 weights), plus a bias for each filter, altogether 320 parameters
+- `max_pooling2d` takes each disjoint 2 x 2 squares and collapses them to 1, turning a 26 x 26
+"image" to a 13 x 13. No parameters are associated with this step.
 - `flatten`: turns each "pixel" in each node to one separate node: 13 x 13 x 32 = 5408
 - `dense`: fully connected layer: 5408 nodes x 16 new nodes + 16 biases = 86544
 - final fully connected layer: 16 x 10 + 10 = 170
 
-```{r}
-cnn_model %>% compile(
+
+```{r cnn-setup}
+compile(
+  cnn_model,
   loss = 'categorical_crossentropy',
   optimizer = optimizer_rmsprop(),
   metrics = c('accuracy')
 )
 ```
 
-```{r}
-history <- cnn_model %>% fit(
-  x_train, y_train, 
-  epochs = 10, batch_size = 128, 
-  validation_split = 0.2
+```{r cnn-train}
+fit(
+  cnn_model, data_train_x, data_train_y,
+  epochs = 30, batch_size = 128,
+  validation_data = list(data_valid_x, data_valid_y)
 )
 ```
 
-```{r}
-cnn_model %>% evaluate(x_test, y_test)
+```{r keras-predictions}
+cnn_prediction <- tibble(ImageId = seq(nrow(data_test)), Label = predict_classes(cnn_model, data_test_x))
+write_csv(cnn_prediction, "submission3.csv")
 ```
 
 
-## Data augmentation
+
+### Data augmentation
 
 You can increase your training sample size and sharpen your model with slightly
 modifying your training sample data points, retaining the labels.
 
-```{r}
-mnist <- dataset_mnist()
-x_train_orig <- mnist$train$x
-y_train_orig <- mnist$train$y
-x_test <- mnist$test$x
-y_test <- mnist$test$y
-
-set.seed(12112)
-validation_share <- 0.2
-train_indices <- sample(1:nrow(x_train_orig), (1 - validation_share)*nrow(x_train_orig))
-x_train <- x_train_orig[train_indices, ,]
-x_valid <- x_train_orig[-train_indices, ,]
-y_train <- y_train_orig[train_indices]
-y_valid <- y_train_orig[-train_indices]
-```
-
-Pre-process the data:
-```{r}
-x_train <- array_reshape(x_train, c(nrow(x_train), 28, 28, 1))
-x_valid <- array_reshape(x_valid, c(nrow(x_valid), 28, 28, 1))
-x_test <- array_reshape(x_test, c(nrow(x_test), 28, 28, 1))
-
-x_train <- x_train / 255
-x_valid <- x_valid / 255
-x_test <- x_test / 255
-
-# one-hot encoding of the target variable
-y_train <- to_categorical(y_train, 10)
-y_valid <- to_categorical(y_valid, 10)
-y_test <- to_categorical(y_test, 10)
-```
-
 Set up steps with which we can alter images a bit:
-```{r}
+```{r data-augmentation}
 batch_size <- 128
 
 train_datagen <- image_data_generator(
@@ -258,384 +326,106 @@ train_datagen <- image_data_generator(
 valid_datagen <- image_data_generator()
 
 train_generator <- flow_images_from_data(
-  x = x_train,
-  y = y_train,
+  x = data_train_x,
+  y = data_train_y,
   generator = train_datagen,
   batch_size = batch_size
 )
 
 valid_generator <- flow_images_from_data(
-  x = x_valid,
-  y = y_valid,
+  x = data_valid_x,
+  y = data_valid_y,
   generator = valid_datagen,
   batch_size = batch_size
 )
 ```
 
-```{r}
-cnn_model_w_augmentation <- keras_model_sequential() 
-cnn_model_w_augmentation %>% 
-  layer_conv_2d(filters = 32,
-                kernel_size = c(3, 3), 
-                activation = 'relu',
-                input_shape = c(28, 28, 1)) %>%
-  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+```{r cnn-with-augmentation}
+cnn_model_w_augmentation <- keras_model_sequential()
+cnn_model_w_augmentation %>%
+  layer_conv_2d(
+    filters = 32,
+    kernel_size = c(3, 3),
+    activation = 'relu',
+    input_shape = c(28, 28, 1)
+  ) %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
   layer_dropout(rate = 0.25) %>%
-  layer_flatten() %>% 
-  layer_dense(units = 32, activation = 'relu') %>% 
+  layer_flatten() %>%
+  layer_dense(units = 32, activation = 'relu') %>%
   layer_dense(units = 10, activation = 'softmax')
 
-cnn_model_w_augmentation %>% compile(
+compile(
+  cnn_model_w_augmentation,
   loss = 'categorical_crossentropy',
   optimizer = optimizer_rmsprop(),
   metrics = c('accuracy')
 )
 
-cnn_model_w_augmentation %>% fit_generator(
+fit_generator(
+  cnn_model_w_augmentation,
   train_generator,
   epochs = 10,
-  steps_per_epoch = nrow(x_train) / batch_size,  # this does not make a difference here -- batch_size of the generator determines how training works
+  steps_per_epoch = nrow(data_train_x) / batch_size,  # this does not make a difference here -- batch_size of the generator determines how training works
   validation_data = valid_generator,
-  validation_steps = nrow(x_valid) / batch_size
+  validation_steps = nrow(data_valid_x) / batch_size
 )
 ```
 
-```{r}
-# cnn_model_w_augmentation %>% evaluate(x_test, y_test)
+```{r keras-predictions}
+cnn_augmented_prediction <- tibble(ImageId = seq(nrow(data_test)), Label = predict_classes(cnn_model_w_augmentation, data_test_x))
+write_csv(cnn_augmented_prediction, "submission4.csv")
 ```
 
-### Data augmentation may help enormously when you have small data
+### Transfer learning
 
-```{r}
-# create a smaller version of the training sample
-set.seed(123)
-small_data_indices <- sample(1:nrow(x_train), size = 3000)
-x_train_small <- x_train[small_data_indices, , ,]
-x_train_small <- array_reshape(x_train_small, c(nrow(x_train_small), 28, 28, 1))
-y_train_small <- y_train[small_data_indices, ]
+If your problem is similar to another one, you might use an already trained model (like the models trained on the famous IMAGENET dataset) to spare time. General patterns in images are common and this knowledge can be "transferred".
+
+Here, I just illustrate how transfer learning works. If you face a more general image recognition problem (e.g. dog vs cat) with less samples, transfer learning might help more.
+
+```{r reshape-for-imagenet}
+reshapeForTransferLearning <- function(x) {
+  x3D <- replicate(3, array_reshape(x, c(nrow(x), 28, 28)))
+  resized_x <- lapply(seq(nrow(x3D)), function(i) image_array_resize(x3D[i,,,], 32, 32))
+  do.call(abind::abind, list(resized_x, along = 0))
+}
+
+data_train_x_reshaped <- reshapeForTransferLearning(data_train_x)
+dim(data_train_x_reshaped)
+data_valid_x_reshaped <- reshapeForTransferLearning(data_valid_x)
 ```
 
-#### Without augmentation
+```{r use-imagenet-model}
+imagenet_model <- application_densenet121(
+  input_shape = c(32, 32, 3), weights = 'imagenet', include_top = FALSE
+)
+```
 
-```{r}
-cnn_model_small_data <- keras_model_sequential() 
-cnn_model_small_data %>% 
-  layer_conv_2d(filters = 32,
-                kernel_size = c(3, 3), 
-                activation = 'relu',
-                input_shape = c(28, 28, 1)) %>%
-  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
-  layer_dropout(rate = 0.25) %>%
-  layer_flatten() %>% 
-  layer_dense(units = 32, activation = 'relu') %>% 
+```{r transfer-model-setup}
+transfer_model <- keras_model_sequential() %>%
+  imagenet_model %>%
+  layer_flatten()  %>%
+  layer_dense(units = 128, activation = 'relu') %>%
   layer_dense(units = 10, activation = 'softmax')
 
-cnn_model_small_data %>% compile(
-  loss = 'categorical_crossentropy',
-  optimizer = optimizer_rmsprop(),
-  metrics = c('accuracy')
-)
-
-cnn_model_small_data %>% fit(
-  x_train_small, y_train_small, 
-  epochs = 30, 
-  batch_size = 100, 
-  validation_split = 0.2
-)
-```
-
-```{r}
-cnn_model_small_data %>% evaluate(x_test, y_test)
-```
-
-#### With augmentation
-
-```{r}
-batch_size <- 100
-
-train_datagen <- image_data_generator(
-  rotation_range = 20
-  # width_shift_range = 0.1,
-  # height_shift_range = 0.1
-  # shear_range = 0.05
-  # zoom_range = 0.1
-)
-
-valid_datagen <- image_data_generator()
-
-small_train_generator <- flow_images_from_data(
-  x = x_train_small,
-  y = y_train_small,
-  generator = train_datagen,
-  batch_size = batch_size
-)
-
-valid_generator <- flow_images_from_data(
-  x = x_valid,
-  y = y_valid,
-  generator = valid_datagen,
-  batch_size = batch_size
-)
-```
-
-```{r}
-cnn_model_w_augmentation_small_data <- keras_model_sequential() 
-cnn_model_w_augmentation_small_data %>% 
-  layer_conv_2d(filters = 32,
-                kernel_size = c(3, 3), 
-                activation = 'relu',
-                input_shape = c(28, 28, 1)) %>%
-  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
-  layer_dropout(rate = 0.25) %>%
-  layer_flatten() %>% 
-  layer_dense(units = 32, activation = 'relu') %>% 
-  layer_dense(units = 10, activation = 'softmax')
-
-cnn_model_w_augmentation_small_data %>% compile(
-  loss = 'categorical_crossentropy',
-  optimizer = optimizer_rmsprop(),
-  metrics = c('accuracy')
-)
-
-cnn_model_w_augmentation_small_data %>% fit_generator(
-  small_train_generator,
-  epochs = 30,
-  steps_per_epoch = nrow(x_train_small) / batch_size,  # this does not make a difference here -- batch_size of the generator determines how training works
-  validation_data = valid_generator,
-  validation_steps = nrow(x_valid) / batch_size
-)
-```
-
-```{r}
-cnn_model_w_augmentation_small_data %>% evaluate(x_test, y_test)
-```
-
-## Dog or cat?
-
-### Build our own model
-
-```{r}
-library(keras)
-library(here)
-library(grid)
-library(magick)
-# continue from here: why is this not working??
-example_image_path <- file.path(here(), "/data/dogs-vs-cats/train/cats/cat_10.jpg")
-
-image_read(example_image_path)  # this is a PIL image
-```
-
-```{r}
-img <- image_load(example_image_path, target_size = c(150, 150))  # this is a PIL image
-x <- image_to_array(img) / 255
-grid::grid.raster(x)
-```
-
-Use data augmentation:
-```{r}
-train_datagen = image_data_generator(
-  rescale = 1/255,
-  rotation_range = 40,
-  width_shift_range = 0.2,
-  height_shift_range = 0.2,
-  shear_range = 0.2,
-  zoom_range = 0.2,
-  horizontal_flip = TRUE,
-  fill_mode = "nearest"
-)
-
-# Note that the validation data shouldn't be augmented!
-validation_datagen <- image_data_generator(rescale = 1/255)  
-
-test_datagen <- image_data_generator(rescale = 1/255)  
-```
-
-```{r}
-xx <- flow_images_from_data(
-  array_reshape(x * 255, c(1, dim(x))),  # take the previous image as base, multiplication is only to conform with the image generator's rescale parameter
-  generator = train_datagen
-)
-
-augmented_versions <- lapply(1:10, function(ix) generator_next(xx) %>%  {.[1, , , ]})
-
-# see examples by running in console:
-grid::grid.raster(augmented_versions[[3]])
-```
-
-```{r}
-image_size <- c(150, 150)
-batch_size <- 50
-
-train_generator <- flow_images_from_directory(
-  file.path(here(), "data/dogs-vs-cats/train/"), # Target directory  
-  train_datagen,              # Data generator
-  target_size = image_size,  # Resizes all images to 150 × 150
-  batch_size = batch_size,
-  class_mode = "binary"       # binary_crossentropy loss for binary labels
-)
-
-validation_generator <- flow_images_from_directory(
-  file.path(here(), "data/dogs-vs-cats/validation/"),   
-  validation_datagen,
-  target_size = image_size,
-  batch_size = batch_size,
-  class_mode = "binary"
-)
-
-test_generator <- flow_images_from_directory(
-  file.path(here(), "data/dogs-vs-cats/test/"), # Target directory  
-  test_datagen,
-  target_size = image_size,
-  batch_size = batch_size,
-  class_mode = "binary"
-)
-
-cat_dog_model <- keras_model_sequential() 
-cat_dog_model %>% 
-  layer_conv_2d(filters = 32,
-                kernel_size = c(3, 3), 
-                activation = 'relu',
-                input_shape = c(150, 150, 3)) %>%
-  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
-  layer_conv_2d(filters = 16,
-                kernel_size = c(3, 3), 
-                activation = 'relu') %>%
-  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
-  layer_conv_2d(filters = 16,
-                kernel_size = c(3, 3), 
-                activation = 'relu') %>%
-  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
-  layer_dropout(rate = 0.25) %>% 
-  layer_flatten() %>% 
-  layer_dense(units = 8, activation = 'relu') %>% 
-  layer_dense(units = 1, activation = "sigmoid")   # for binary
-
-cat_dog_model %>% compile(
-  loss = "binary_crossentropy",
-  optimizer = optimizer_rmsprop(lr = 2e-5),
-  metrics = c("accuracy")
-)
-```
-
-```{r}
-# BEWARE: takes long time, reaches about 60% validation accuracy
-
-# history <- cat_dog_model %>% fit_generator(
-#   train_generator,
-#   steps_per_epoch = 2000 / batch_size,
-#   epochs = 30,
-#   validation_data = validation_generator,
-#   validation_steps = 50
-# )
-```
-
-See more in [this blogpost](https://blogs.rstudio.com/tensorflow/posts/2017-12-14-image-classification-on-small-datasets/).
-
-## Transfer learning: use pre-trained models as base
-
-```{r}
-model_imagenet <- application_mobilenet_v2(weights = "imagenet")
-```
-
-```{r}
-example_image_path <- file.path(here(), "/data/dogs-vs-cats/train/cats/cat_10.jpg")
-img <- image_load(example_image_path, target_size = c(224, 224))  # 224: to conform with pre-trained network's inputs
-x <- image_to_array(img)
-
-# ensure we have a 4d tensor with single element in the batch dimension,
-# the preprocess the input for prediction using mobilenet
-x <- array_reshape(x, c(1, dim(x)))
-x <- mobilenet_preprocess_input(x)
-
-# make predictions then decode and print them
-preds <- model_imagenet %>% predict(x)
-mobilenet_decode_predictions(preds, top = 3)[[1]]
-```
-
-```{r}
-train_datagen = image_data_generator(
-  rescale = 1/255,
-  rotation_range = 40,
-  width_shift_range = 0.2,
-  height_shift_range = 0.2,
-  shear_range = 0.2,
-  zoom_range = 0.2,
-  horizontal_flip = TRUE,
-  fill_mode = "nearest"
-)
-
-# Note that the validation data shouldn't be augmented!
-validation_datagen <- image_data_generator(rescale = 1/255)  
-
-test_datagen <- image_data_generator(rescale = 1/255)  
-
-image_size <- c(128, 128)
-batch_size <- 10  # for speed up
-
-train_generator <- flow_images_from_directory(
-  file.path(here(), "data/dogs-vs-cats/train/"), # Target directory  
-  train_datagen,              # Data generator
-  target_size = image_size,  # Resizes all images 
-  batch_size = batch_size,
-  class_mode = "binary"       # binary_crossentropy loss for binary labels
-)
-
-validation_generator <- flow_images_from_directory(
-  file.path(here(), "data/dogs-vs-cats/validation/"),   
-  validation_datagen,
-  target_size = image_size,
-  batch_size = batch_size,
-  class_mode = "binary"
-)
-
-test_generator <- flow_images_from_directory(
-  file.path(here(), "data/dogs-vs-cats/test/"), # Target directory  
-  test_datagen,
-  target_size = image_size,
-  batch_size = batch_size,
-  class_mode = "binary"
-)
-```
-
-
-```{r}
-# create the base pre-trained model
-base_model <- application_mobilenet_v2(weights = 'imagenet', include_top = FALSE,
-                                    input_shape = c(image_size, 3))
-
-# train only the top layers (which were randomly initialized)
-
-# add our custom layers
-model <- keras_model_sequential() %>% 
-  base_model %>% 
-  layer_global_average_pooling_2d() %>% 
-  layer_dense(units = 16, activation = 'relu') %>% 
-  layer_dense(units = 1, activation = 'sigmoid')
-
-# freeze all convolutional mobilenet layers
-freeze_weights(base_model)
-
-# compile the model (should be done *after* setting layers to non-trainable)
-model %>% compile(
+compile(
+  transfer_model,
   loss = "binary_crossentropy",
   optimizer = optimizer_rmsprop(),
   metrics = c("accuracy")
 )
+summary(transfer_model)
 ```
 
-```{r}
-# train the model
-model %>% fit_generator(
-  train_generator,
-  steps_per_epoch = 2000 / batch_size,
-  epochs = 1,  # takes long time to train more
-  validation_data = validation_generator,
-  validation_steps = 500
+```{r freeze-params}
+freeze_weights(imagenet_model, to = "conv5_block16_2_conv")
+summary(transfer_model)
+```
+
+```{r train-tranfer-model}
+fit(
+  transfer_model, data_train_x_reshaped, data_train_y,
+  epochs = 5, batch_size = 128,
+  validation_data = list(data_valid_x_reshaped, data_valid_y)
 )
 ```
-
-```{r}
-model %>% evaluate_generator(test_generator, steps = 200)
-```
-
-We can reach much higher accuracy with the same data in shorter time if we rely on pre-trained models with similar applications. This is called "transfer learning" -- we transfer the knowledge learned on similar datasets to our current one and modify it for our purposes.
